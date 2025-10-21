@@ -9,9 +9,11 @@ import SwiftUI
 
 @main
 struct BreakdownApp: App {
+    @StateObject private var viewModel = TaskBoardViewModel()
+    
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(viewModel: viewModel)
         }
     }
 }
