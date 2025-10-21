@@ -65,7 +65,7 @@ struct ContentView: View {
             .padding(.bottom, 32)
         }
         .sheet(isPresented: $isPresentingAddSheet) {
-            AddTaskPlaceholder()
+            AddTaskSheet(viewModel: viewModel, isPresented: $isPresentingAddSheet)
         }
     }
 }
@@ -271,34 +271,6 @@ private struct AddTaskButton: View {
         }
         .accessibilityLabel("タスクを追加")
     }
-}
-
-private struct AddTaskPlaceholder: View {
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: 16) {
-                Image(systemName: "hammer")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.secondary)
-                Text("タスク作成シートを準備中です。")
-                    .font(.headline)
-                Text("次のコミットでフォームとバリデーションを実装します。")
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-            .padding()
-            .navigationTitle("新規タスク")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("閉じる") {
-                        dismiss()
-                    }
-                }
-            }
-        }
-    }
-    
-    @Environment(\.dismiss) private var dismiss
 }
 
 #Preview {
