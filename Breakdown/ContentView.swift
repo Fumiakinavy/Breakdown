@@ -7,34 +7,122 @@
 
 import SwiftUI
 
+enum TaskBoardTab: Hashable {
+    case inbox
+    case active
+    case completed
+    
+    var title: String {
+        switch self {
+        case .inbox: return "Inbox"
+        case .active: return "Active"
+        case .completed: return "Completed"
+        }
+    }
+    
+    var systemImage: String {
+        switch self {
+        case .inbox: return "tray.full"
+        case .active: return "list.bullet.clipboard"
+        case .completed: return "checkmark.circle"
+        }
+    }
+}
+
 struct ContentView: View {
+    @ObservedObject var viewModel: TaskBoardViewModel
+    @State private var selectedTab: TaskBoardTab = .inbox
+    @State private var isPresentingAddSheet = false
+    
+    var body: some View {
+        TabView(selection: $selectedTab) {
+            InboxPage(viewModel: viewModel)
+                .tabItem {
+                    Label(TaskBoardTab.inbox.title, systemImage: TaskBoardTab.inbox.systemImage)
+                }
+                .tag(TaskBoardTab.inbox)
+                .badge(viewModel.inboxTasks.count)
+            
+            ActivePage(viewModel: viewModel)
+                .tabItem {
+                    Label(TaskBoardTab.active.title, systemImage: TaskBoardTab.active.systemImage)
+                }
+                .tag(TaskBoardTab.active)
+                .badge(viewModel.activeTasks.count)
+            
+            CompletedPage(viewModel: viewModel)
+                .tabItem {
+                    Label(TaskBoardTab.completed.title, systemImage: TaskBoardTab.completed.systemImage)
+                }
+                .tag(TaskBoardTab.completed)
+                .badge(viewModel.completedTasks.count)
+        }
+        .overlay(alignment: .bottomTrailing) {
+            AddTaskButton {
+                isPresentingAddSheet = true
+            }
+            .padding(.trailing, 24)
+            .padding(.bottom, 32)
+        }
+        .sheet(isPresented: $isPresentingAddSheet) {
+            AddTaskPlaceholder()
+        }
+    }
+}
+
+private struct InboxPage: View {
     @ObservedObject var viewModel: TaskBoardViewModel
     
     var body: some View {
         NavigationStack {
             List {
-                Section("詳細化待ちタスク") {
-                    if viewModel.inboxTasks.isEmpty {
-                        ContentUnavailableView("タスクなし", systemImage: "tray", description: Text("右下のボタンからタスクを追加しましょう。"))
-                    } else {
-                        ForEach(viewModel.inboxTasks) { task in
-                            InboxTaskRow(task: task)
-                        }
-                    }
-                }
-                
-                Section("作業中タスク") {
-                    if viewModel.activeTasks.isEmpty {
-                        Text("まだ実行中のタスクはありません。")
-                            .foregroundStyle(.secondary)
-                    } else {
-                        ForEach(viewModel.activeTasks) { task in
-                            ActiveTaskRow(task: task)
-                        }
+                if viewModel.inboxTasks.isEmpty {
+                    ContentUnavailableView("タスクなし", systemImage: "tray", description: Text("右下のボタンからタスクを追加しましょう。"))
+                } else {
+                    ForEach(viewModel.inboxTasks) { task in
+                        InboxTaskRow(task: task)
                     }
                 }
             }
-            .navigationTitle("Breakdown")
+            .navigationTitle("詳細化待ち")
+        }
+    }
+}
+
+private struct ActivePage: View {
+    @ObservedObject var viewModel: TaskBoardViewModel
+    
+    var body: some View {
+        NavigationStack {
+            List {
+                if viewModel.activeTasks.isEmpty {
+                    ContentUnavailableView("作業中タスクなし", systemImage: "checklist", description: Text("詳細化を完了するとここに表示されます。"))
+                } else {
+                    ForEach(viewModel.activeTasks) { task in
+                        ActiveTaskRow(task: task)
+                    }
+                }
+            }
+            .navigationTitle("実行中")
+        }
+    }
+}
+
+private struct CompletedPage: View {
+    @ObservedObject var viewModel: TaskBoardViewModel
+    
+    var body: some View {
+        NavigationStack {
+            List {
+                if viewModel.completedTasks.isEmpty {
+                    ContentUnavailableView("完了タスクなし", systemImage: "archivebox", description: Text("完了したタスクはここに保存されます。"))
+                } else {
+                    ForEach(viewModel.completedTasks) { task in
+                        CompletedTaskRow(task: task)
+                    }
+                }
+            }
+            .navigationTitle("完了済み")
         }
     }
 }
@@ -101,6 +189,37 @@ private struct ActiveTaskRow: View {
     }
 }
 
+private struct CompletedTaskRow: View {
+    let task: Task
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text(task.title)
+                    .font(.headline)
+                Spacer()
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+            }
+            if let completedAt = task.completedAt {
+                Label {
+                    Text(completedAt, style: .date)
+                } icon: {
+                    Image(systemName: "calendar")
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            }
+            if !task.steps.isEmpty {
+                Text("\(task.steps.count) ステップ")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
 private struct ConflictBadge: View {
     let score: Double
     
@@ -136,6 +255,50 @@ private struct ConflictBadge: View {
             return .red
         }
     }
+}
+
+private struct AddTaskButton: View {
+    let action: () -> Void
+    
+    var body: some View {
+        Button(action: action) {
+            Image(systemName: "plus")
+                .font(.system(size: 22, weight: .bold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(Color.accentColor, in: Circle())
+                .shadow(color: .black.opacity(0.25), radius: 10, x: 0, y: 6)
+        }
+        .accessibilityLabel("タスクを追加")
+    }
+}
+
+private struct AddTaskPlaceholder: View {
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: 16) {
+                Image(systemName: "hammer")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.secondary)
+                Text("タスク作成シートを準備中です。")
+                    .font(.headline)
+                Text("次のコミットでフォームとバリデーションを実装します。")
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding()
+            .navigationTitle("新規タスク")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("閉じる") {
+                        dismiss()
+                    }
+                }
+            }
+        }
+    }
+    
+    @Environment(\.dismiss) private var dismiss
 }
 
 #Preview {
