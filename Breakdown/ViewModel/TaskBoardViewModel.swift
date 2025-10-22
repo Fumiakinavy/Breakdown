@@ -38,12 +38,12 @@ final class TaskBoardViewModel: ObservableObject {
             .sorted { ($0.completedAt ?? $0.dueAt ?? $0.createdAt) > ($1.completedAt ?? $1.dueAt ?? $1.createdAt) }
     }
     
-    func addTask(title: String, dueDate: Date?, preferredSlot: PreferredSlot, estimatedMinutes: Int = 30) {
+    func addTask(title: String, dueDate: Date?, priority: TaskPriority, estimatedMinutes: Int = 30) {
         var newTask = Task(
             title: title,
             createdAt: Date(),
             dueAt: dueDate,
-            preferredSlot: preferredSlot,
+            priority: priority,
             status: .draft,
             baselineEstimateMinutes: estimatedMinutes
         )

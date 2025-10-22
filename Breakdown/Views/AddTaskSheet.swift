@@ -7,7 +7,7 @@ struct AddTaskSheet: View {
     @State private var title: String = ""
     @State private var includeDueDate: Bool = true
     @State private var dueDate: Date = Calendar.current.startOfDay(for: Date())
-    @State private var preferredSlot: PreferredSlot = .anytime
+    @State private var priority: TaskPriority = .medium
     @State private var estimatedMinutes: Int = 30
     @State private var validationMessage: String?
     @FocusState private var isTitleFocused: Bool
@@ -19,9 +19,9 @@ struct AddTaskSheet: View {
                     TextField("タイトル（必須）", text: $title)
                         .focused($isTitleFocused)
                         .textInputAutocapitalization(.sentences)
-                    Picker("希望時間帯", selection: $preferredSlot) {
-                        ForEach(PreferredSlot.allCases, id: \.self) { slot in
-                            Text(slot.localizedName).tag(slot)
+                    Picker("優先度", selection: $priority) {
+                        ForEach(TaskPriority.allCases, id: \.self) { priority in
+                            Text(priority.localizedName).tag(priority)
                         }
                     }
                     .pickerStyle(.segmented)
@@ -87,7 +87,7 @@ struct AddTaskSheet: View {
         viewModel.addTask(
             title: trimmedTitle,
             dueDate: due,
-            preferredSlot: preferredSlot,
+            priority: priority,
             estimatedMinutes: estimatedMinutes
         )
         dismiss()

@@ -12,18 +12,16 @@ enum TaskStepState: String, Codable, CaseIterable {
     case done
 }
 
-enum PreferredSlot: String, Codable, CaseIterable {
-    case anytime
-    case morning
-    case afternoon
-    case evening
+enum TaskPriority: String, Codable, CaseIterable {
+    case high
+    case medium
+    case low
     
     var localizedName: String {
         switch self {
-        case .anytime: return "いつでも"
-        case .morning: return "午前"
-        case .afternoon: return "午後"
-        case .evening: return "夜"
+        case .high: return "高"
+        case .medium: return "中"
+        case .low: return "低"
         }
     }
 }
@@ -62,7 +60,7 @@ struct Task: Identifiable, Hashable, Codable {
     var detail: String?
     var createdAt: Date
     var dueAt: Date?
-    var preferredSlot: PreferredSlot
+    var priority: TaskPriority
     var status: TaskStatus
     var steps: [TaskStep]
     var baselineEstimateMinutes: Int
@@ -76,7 +74,7 @@ struct Task: Identifiable, Hashable, Codable {
         detail: String? = nil,
         createdAt: Date = Date(),
         dueAt: Date? = nil,
-        preferredSlot: PreferredSlot = .anytime,
+        priority: TaskPriority = .medium,
         status: TaskStatus = .draft,
         steps: [TaskStep] = [],
         baselineEstimateMinutes: Int = 30,
@@ -89,7 +87,7 @@ struct Task: Identifiable, Hashable, Codable {
         self.detail = detail
         self.createdAt = createdAt
         self.dueAt = dueAt
-        self.preferredSlot = preferredSlot
+        self.priority = priority
         self.status = status
         self.steps = steps
         self.baselineEstimateMinutes = baselineEstimateMinutes
@@ -140,11 +138,11 @@ struct TaskConflictAnalyzer {
         
         for task in tasks where task.status != .completed {
             let anchorDate = task.dueAt ?? calendar.startOfDay(for: referenceDate)
-            let day = calendar.startOfDay(for: anchorDate)
-            taskDates[task.id] = day
-            workloadByDay[day, default: 0] += task.totalEstimatedMinutes
-        }
-        
+        let day = calendar.startOfDay(for: anchorDate)
+        taskDates[task.id] = day
+        workloadByDay[day, default: 0] += task.totalEstimatedMinutes
+    }
+    
         for (taskID, day) in taskDates {
             let total = workloadByDay[day, default: 0]
             let isWeekend = calendar.isDateInWeekend(day)
@@ -173,7 +171,7 @@ enum TaskSampleData {
             detail: "メモしたアイデアを整理し、AI分解を依頼する。",
             createdAt: today,
             dueAt: tomorrow,
-            preferredSlot: .afternoon,
+            priority: .high,
             status: .draft,
             baselineEstimateMinutes: 45
         )
@@ -183,7 +181,7 @@ enum TaskSampleData {
             detail: "Inbox画面のワイヤーフレームを仕上げる。",
             createdAt: today,
             dueAt: tomorrow,
-            preferredSlot: .morning,
+            priority: .medium,
             status: .refined,
             steps: [
                 TaskStep(title: "競合リサーチ確認", estimatedMinutes: 30, orderIndex: 0),
@@ -198,7 +196,7 @@ enum TaskSampleData {
             detail: "完了タスクの振り返りと次週計画。",
             createdAt: calendar.date(byAdding: .day, value: -3, to: today) ?? today,
             dueAt: weekend,
-            preferredSlot: .evening,
+            priority: .low,
             status: .completed,
             steps: [
                 TaskStep(title: "完了タスク整理", estimatedMinutes: 20, orderIndex: 0, state: .done),

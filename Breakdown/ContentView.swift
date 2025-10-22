@@ -143,11 +143,11 @@ private struct InboxTaskRow: View {
                             Image(systemName: "calendar")
                         }
                     }
-                    Text(task.preferredSlot.localizedName)
+                    Text("優先度: \(task.priority.localizedName)")
                         .font(.caption)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.blue.opacity(0.1), in: Capsule())
+                        .background(priorityColor.opacity(0.15), in: Capsule())
                 }
                 .foregroundStyle(.secondary)
             }
@@ -157,6 +157,14 @@ private struct InboxTaskRow: View {
             }
         }
         .padding(.vertical, 4)
+    }
+    
+    private var priorityColor: Color {
+        switch task.priority {
+        case .high: return .red
+        case .medium: return .orange
+        case .low: return .blue
+        }
     }
 }
 
