@@ -113,6 +113,15 @@ final class TaskBoardViewModel: ObservableObject {
         }
     }
     
+    func reorderSteps(taskID: UUID, fromOffsets: IndexSet, toOffset: Int) {
+        guard let taskIndex = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[taskIndex].steps.move(fromOffsets: fromOffsets, toOffset: toOffset)
+        for index in tasks[taskIndex].steps.indices {
+            tasks[taskIndex].steps[index].orderIndex = index
+        }
+        recalculateConflicts()
+    }
+    
     private func observeCapacityChanges() {
         $capacity
             .dropFirst()

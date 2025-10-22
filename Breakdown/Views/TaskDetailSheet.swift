@@ -4,6 +4,7 @@ struct TaskDetailSheet: View {
     @ObservedObject var viewModel: TaskBoardViewModel
     let taskID: UUID
     @Environment(\.dismiss) private var dismiss
+    @State private var editMode: EditMode = .inactive
     
     var body: some View {
         NavigationStack {
@@ -30,11 +31,12 @@ struct TaskDetailSheet: View {
                     }
                     
                     Section("ステップ") {
-                        if task.steps.isEmpty {
+                        let steps = task.steps.sorted { $0.orderIndex < $1.orderIndex }
+                        if steps.isEmpty {
                             Text("まだステップが登録されていません。")
                                 .foregroundStyle(.secondary)
                         } else {
-                            ForEach(task.steps) { step in
+                            ForEach(steps) { step in
                                 Button {
                                     viewModel.advanceStep(taskID: task.id, stepID: step.id)
                                 } label: {
@@ -57,6 +59,9 @@ struct TaskDetailSheet: View {
                                 }
                                 .buttonStyle(.plain)
                             }
+                            .onMove { indices, newOffset in
+                                viewModel.reorderSteps(taskID: task.id, fromOffsets: indices, toOffset: newOffset)
+                            }
                         }
                     }
                     
@@ -72,10 +77,16 @@ struct TaskDetailSheet: View {
                 }
                 .navigationTitle("タスク詳細")
                 .navigationBarTitleDisplayMode(.inline)
+                .environment(\.editMode, $editMode)
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         Button("閉じる") {
                             dismiss()
+                        }
+                    }
+                    ToolbarItem(placement: .primaryAction) {
+                        if let steps = viewModel.task(with: taskID)?.steps, !steps.isEmpty {
+                            EditButton()
                         }
                     }
                 }
