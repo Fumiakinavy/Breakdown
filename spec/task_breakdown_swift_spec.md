@@ -81,6 +81,16 @@
   - シミュレートポップアップで提案ステップごとの影響をプレビュー。
 - アクション: コンフリクトが高い場合、AIにリスケプラン再提案を依頼するボタン、またはユーザーによる時間帯再設定を促す。
 
+### 4.8 グラフエディタ & 事前LLM分割
+- 目的: タスク詳細化を思考マップのように可視化し、LLMが事前生成したサブタスクを高速に編集できる体験を実現する。
+- フロー:
+  1. タスク登録完了時にLangGraph経由で分割ジョブをバックエンドキューへ投入。citeturn0search0turn0search1
+  2. ワーカーがユーザー履歴Embeddingと最新プロンプトテンプレを組み合わせてサブタスク候補を生成。
+  3. 結果は`SubtaskNode`/`SubtaskEdge`として保存し、クライアントがグラフエディタで可視化。
+  4. ユーザー操作（編集・再生成・昇格）は即時にAPIへ反映し、LangGraph側へフィードバックイベントとして送信。
+- 機能:
+  - ノード追加・接続、ドラッグ並び替え、Undo/Redo、AI再提案差分プレビュー。
+  - 履歴ベース最適化: `UserProfile`に蓄積したembeddingで類似過去タスクからノード候補をレコメンド。citeturn0search2turn0search3
 ## 5. 非機能要件
 - 起動 < 2 秒 (iPhone 14 Pro ベンチマーク)。
 - API 応答タイムアウト 10 秒、リトライ 1 回。
@@ -92,12 +102,16 @@
 ```mermaid
 erDiagram
     Task ||--o{ TaskStep : has
+    Task ||--o{ SubtaskNode : owns
+    SubtaskNode ||--o{ SubtaskEdge : connects
+    Task ||--o{ TaskLLMRun : generates
+    UserProfile ||--o{ TaskLLMRun : context
     Task {
         UUID id
         String title
         Date createdAt
         Date? dueAt
-        String? preferredSlot
+        String priority // high, medium, low
         String status // draft, refined, completed
         Date? completedAt
         String? aiPromptContext
@@ -114,16 +128,72 @@ erDiagram
         Date? scheduledAt
         Double? conflictContribution // 衝突スコアへの寄与度
     }
+    SubtaskNode {
+        UUID id
+        UUID taskId
+        UUID? parentNodeId
+        String title
+        String? aiProposedTitle
+        Double confidence
+        Map metadata // embeddingId, tags
+        Int layoutX
+        Int layoutY
+        Boolean isUserEdited
+    }
+    SubtaskEdge {
+        UUID id
+        UUID taskId
+        UUID sourceNodeId
+        UUID targetNodeId
+        String relation // sequence, dependency, blocker
+    }
+    TaskLLMRun {
+        UUID id
+        UUID taskId
+        Date requestedAt
+        Date completedAt
+        String modelName
+        String status // queued, running, succeeded, failed
+        Double latencyMs
+        JSON promptSnapshot
+        JSON responseSnapshot
+    }
+    UserProfile {
+        UUID id
+        JSON embeddingRef
+        JSON schedulingPreference // workHours, focusBlocks
+        JSON skillSignals // domain proficiency scores
+    }
 ```
 - 追加エンティティ候補: `UserProfile`, `NotificationSetting`, `AIModelPreference`。
-- `UserProfile`にはユーザーの1日あたり可処分時間や休暇設定などのスケジュール前提を保持。
+- `UserProfile`にはユーザーの1日あたり可処分時間や休暇設定、過去タスク履歴のembedding参照などのスケジュール前提を保持。
+- `SubtaskNode`はグラフエディタに表示するノード情報とLLM提案の信頼度を保持。`layoutX/Y`はデバイス幅に合わせた正規化座標を保存し、クライアントは再描画時にスケーリングする。
+- `TaskLLMRun`はバックグラウンド分割処理のメタデータを保持し、失敗時リトライやA/Bモデル比較に利用する。
+- Embeddingメタデータは`pgvector`拡張を利用したPostgreSQLの`vector`カラムに格納し、過去タスクの類似抽出をRAGで行う。citeturn0search2turn0search3
 
 ## 7. API インターフェース (暫定)
-- `POST /v1/task/breakdown`  
-  - 入力: `taskTitle`, `context`, `preferredSlot`, `history`.  
-  - 出力: `steps[]` (title, description, estimatedMinutes, suggestedSchedule).  
-  - エラーハンドリング: タイムアウト、レート制限、APIキー不正。
-- SDK 実装: `TaskBreakdownService` (Combine `Future` ベース)。
+- `POST /v1/task`  
+  - 入力: `title`, `detail?`, `priority`, `dueAt?`, `captureContext?`。  
+  - 挙動: 同期レスポンスではタスクIDと暫定メタデータのみ返却。非同期でLLM分割ジョブをキュー投入。
+- `POST /v1/task/{id}/graph/rebuild`  
+  - 入力: `modelOverride?`, `promptHints?`。  
+  - 用途: 手動でサブタスク分割を再実行し、既存ノードにバージョンを付与。
+- `GET /v1/task/{id}/graph`  
+  - 出力: `nodes[]`, `edges[]`, `layout`, `llmRun`。  
+  - オプション: `?includeAudit=true`でLLMラン履歴を付与。
+- `PATCH /v1/task/{id}/graph/node/{nodeId}`  
+  - 入力: `title`, `metadata`, `status`。  
+  - 用途: ユーザー編集内容を保存し`isUserEdited`を更新。
+- `POST /v1/task/{id}/graph/reorder`  
+  - 入力: `updates[]` (nodeId, orderIndex, layoutX, layoutY)。  
+  - 用途: クライアントで編集したノード座標・順序を一括更新。
+- `GET /v1/task/{id}/recommendations`  
+  - 出力: 類似タスク・テンプレート候補、`confidence`, `explanations`。  
+  - データソース: `pgvector` + `TaskLLMRun`ハイライト。
+- `POST /v1/task/breakdown` (バックエンド内部フック)  
+  - 入力: `taskId`, `promptPayload`, `historyEmbeddingIds`。  
+  - 用途: ワーカーがLLM推論後に`SubtaskNode`/`SubtaskEdge`を保存。LangGraphワークフローの終端から呼び出す。citeturn0search0
+- SDK 実装: `TaskBreakdownService` (Combine `Future` ベース) に加え、`TaskGraphService`（graphエンドポイント）、`TaskRecommendationService`（履歴パーソナライズ）を提供する。
 
 ## 8. UX 詳細仕様
 ### 8.1 共通UX原則
@@ -159,12 +229,23 @@ erDiagram
 - 空状態: バッジ獲得演出と、「完了タスクなし」のメッセージ。
 - 操作: カードタップで振り返り画面（ステップ履歴、コメント、再開ボタン）。
 
-### 8.5 タスクシミュレートポップアップ
-- 構成: 3セクション（概要入力、AI提案ステップ、コンフリクト影響プレビュー）。
-- AIレスポンス待ち: スケルトンビュー + 「分解プラン生成中」メッセージ。
-- ステップ編集: `ForEach` + `EditMode`で順序入替、ステップ追加/削除可。
-- コンフリクトプレビュー: レーダーチャート風メーター + 代替スロット候補。
-- エラー: API失敗時はモーダル内バナー + リトライ/テンプレ使用ボタン。
+### 8.5 グラフエディタ (詳細化ポップアップ)
+- レイアウト: フルスクリーン`sheet`内に`Canvas` + `GeometryReader`でノード/エッジを描画。スクロール・ズーム対応 (`MagnificationGesture`, `DragGesture`)。
+- 初期状態: ルートタスクノードのみ表示。長押し (`LongPressGesture`) でサブタスク展開パネルを表示し、LLM事前生成ノードをフェードイン。
+- ノードUI:
+  - カード内にタイトル・信頼度バッジ・編集アイコン。
+  - ダブルタップでテキストフィールドを表示し`isUserEdited`を更新。
+  - ノードドラッグで`layoutX/Y`を更新。ガイドライン表示で整列を補助。
+- エッジUI: `CGPath`で曲線を描画し、ホバー/タップで関係種別（依存・並行）を表示。
+- アクションツールバー:
+  - `+`ノード追加（空ノード or テンプレートから選択）。
+  - 「AI再提案」ボタンで`/graph/rebuild`を呼び出し差分プレビュー。
+  - 「タイムラインに送る」操作で選択ノードを`TaskStep`へ昇格。
+- 履歴・比較:
+  - 右側に`Timeline`表示。LLM提案バージョンとユーザー編集差分をスライド比較。
+  - Undo/Redoスタックは`Observable`履歴で最大20アクション保持。
+- フィードバック: ノード削除時に理由入力トーストを表示し、バックエンドのフィードバック信号へ送信。
+- オフライン時: 展開ボタンを押すとローカルキャッシュの最新バージョンを表示し、接続復旧後に自動同期。
 
 ### 8.6 通知・リマインド UX
 - 通知カードでアクション:「開始」「スヌーズ30分」「詳細を見る」。
@@ -183,16 +264,23 @@ erDiagram
 ## 9. ユーザーフロー
 ### 9.1 ハッピーパス
 1. 起動 → ページ1表示 → `+`でタスク登録。
-2. タスクセルタップ → AI分解提案を取得 → 編集 → 保存。
+2. 登録直後にバックエンドキューへ分割ジョブ投入（ユーザーには「分割準備中」トースト表示）。
+3. タスクセルタップ → グラフエディタがLLM事前生成ノードを読み込み → 編集 → 保存。
 3. ページ2でステップを遂行 → 完了チェック。  
 4. 全ステップ完了 → 自動的にタスク状態更新 → ページ3へ。  
 5. ページ3で履歴確認、必要に応じ再開 (未完了へ戻す機能はフェーズ2)。
 
 ### 9.2 エッジケースフロー
 - オフライン時: タスク登録はローカル保存のみ。タスク分割はテンプレ提示→オンライン復帰時にAI再依頼。
-- AI失敗時: ポップアップ上でテンプレート選択 or 手動追加。失敗ログは`Task.aiPromptContext`に記録。
-- コンフリクト高スコア時: 警告→「AIに再調整依頼」→ 新たな提案をマージ表示 → ユーザー承認。
+- AI失敗時: グラフエディタにリトライCTAを表示し、テンプレートからノードを追加。失敗ログは`TaskLLMRun`に保存。
+- コンフリクト高スコア時: 警告→「AIに再調整依頼」→ 新たな提案をバージョン差分表示 → ユーザー承認。
 - 期限超過: 期限過ぎのタスクは起動時にダイアログ提示。「延長」「完了扱い」「削除」を選択。
+
+### 9.3 サブタスク最適化フロー
+1. LLM分割結果保存時に`TaskLLMRun`へ推論メタデータ登録。
+2. `UserProfile`へ類似タスクembeddingを更新し、好みの粒度を再学習。
+3. ユーザーがノードを編集/削除 → フィードバックキューへイベント送信。
+4. バックグラウンドでLangGraphワーカーが次回分割Promptを調整し、`aiPromptContext`に保存。citeturn0search0turn0search2
 
 ### 9.3 オンボーディングフロー
 1. 初回起動 → タイトル画面で利用目的を選択 (仕事/学習/その他)。
@@ -206,6 +294,7 @@ erDiagram
 - 期限内完了率。
 - AI提案編集率 (編集ステップ数 / 提案ステップ数)。
 - 平均コンフリクト度合い (計算スコアの移動平均) と高コンフリクトタスクの解消リードタイム。
+- グラフ編集指標: ノード確定率 (編集後保存ノード数 / 提案ノード数)、AI再提案採択率、平均ドラッグ操作回数。
 
 ## 11. リスクと対策
 - **AI品質のばらつき**: フィードバック機構、ユーザーによるステップテンプレ保存。  
@@ -273,3 +362,20 @@ erDiagram
 - Keychain保存時は`kSecAttrAccessibleAfterFirstUnlock`。
 - クリップボードやスクリーンショットへ敏感情報を表示しない。
 - API通信はATS準拠。証明書ピンニングを検討 (フェーズ2)。
+
+### 14.10 LLM分割パイプライン
+- オーケストレーション: LangChainのLangGraphを採用し、ノードとして`PromptBuilder`→`Retriever`→`LLMCall`→`Validator`→`Persister`を構成。分岐を用いて失敗時リトライやモデル切替を行う。citeturn0search0
+- 実行環境: Python 3.12 + uvで軽量ワーカーを構築。ジョブキューにはRedis StreamsまたはCeleryを利用し、WebフロントからはWebhooks経由で非同期通知を受け取る。citeturn0search1
+- モデル選択: デフォルトはGPT-4.1 Turbo (クラウド)、設定でローカル`llama.cpp`ベースモデルに切り替え可能。ローカル時はキャッシュ機構（結果を`TaskLLMRun`に保存）で遅延を抑制。
+- バリデーション: `Guardrails`ポリシーでJSON構造をチェックし、ノード数・推定時間の整合性を確認。失敗時はテンプレート分割を返却。
+
+### 14.11 グラフデータ基盤
+- ストレージ: Core Data上では`SubtaskNode`/`SubtaskEdge`をミラーリングしつつ、サーバーサイドはPostgreSQL + `pgvector`を採用。ノード構造は`ltree` + JSONBで階層と属性を保持、類似検索は`vector`カラムで実施。citeturn0search2turn0search3
+- キャッシュ: Redisにノード一覧をTTL付きでキャッシュし、グラフエディタ初回表示を高速化。
+- バージョニング: `graph_version`列を持ち、ユーザーのUndo/RedoやLLM再提案の差分比較に利用。
+- スナップショット: 大規模更新時にはS3互換ストレージへ`GraphSnapshot`を吐き出し、復旧/監査に備える。
+
+### 14.12 パーソナライズ & フィードバック
+- 埋め込み作成: LangChainの`Embeddings` APIを介してユーザー履歴をベクトル化し、`UserProfile.embeddingRef`で最新の埋め込みIDを保持。RAG再利用の際は`SimilaritySearch`でk近傍タスクを取得。citeturn0search2turn0search3
+- シグナル収集: ノード編集・削除・確定などのイベントを`FeedbackEvent`キューに蓄積し、LangGraph内の`Optimizer`ノードが重みづけを更新。
+- モデル最適化: 定期バッチで過去N件の`TaskLLMRun`を分析し、モデル選択やプロンプトテンプレを自動調整。フェイルセーフとしてA/Bグループを作成し品質指標 (承認率、編集率) を比較。
