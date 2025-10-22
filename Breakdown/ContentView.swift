@@ -33,24 +33,25 @@ struct ContentView: View {
     @ObservedObject var viewModel: TaskBoardViewModel
     @State private var selectedTab: TaskBoardTab = .inbox
     @State private var isPresentingAddSheet = false
+    @State private var detailContext: TaskDetailContext?
     
     var body: some View {
         TabView(selection: $selectedTab) {
-            InboxPage(viewModel: viewModel)
+            InboxPage(viewModel: viewModel, detailContext: $detailContext)
                 .tabItem {
                     Label(TaskBoardTab.inbox.title, systemImage: TaskBoardTab.inbox.systemImage)
                 }
                 .tag(TaskBoardTab.inbox)
                 .badge(viewModel.inboxTasks.count)
             
-            ActivePage(viewModel: viewModel)
+            ActivePage(viewModel: viewModel, detailContext: $detailContext)
                 .tabItem {
                     Label(TaskBoardTab.active.title, systemImage: TaskBoardTab.active.systemImage)
                 }
                 .tag(TaskBoardTab.active)
                 .badge(viewModel.activeTasks.count)
             
-            CompletedPage(viewModel: viewModel)
+            CompletedPage(viewModel: viewModel, detailContext: $detailContext)
                 .tabItem {
                     Label(TaskBoardTab.completed.title, systemImage: TaskBoardTab.completed.systemImage)
                 }
@@ -67,11 +68,19 @@ struct ContentView: View {
         .sheet(isPresented: $isPresentingAddSheet) {
             AddTaskSheet(viewModel: viewModel, isPresented: $isPresentingAddSheet)
         }
+        .sheet(item: $detailContext) { context in
+            TaskDetailSheet(viewModel: viewModel, taskID: context.id)
+        }
     }
+}
+
+private struct TaskDetailContext: Identifiable {
+    let id: UUID
 }
 
 private struct InboxPage: View {
     @ObservedObject var viewModel: TaskBoardViewModel
+    @Binding var detailContext: TaskDetailContext?
     
     var body: some View {
         NavigationStack {
@@ -80,7 +89,12 @@ private struct InboxPage: View {
                     ContentUnavailableView("タスクなし", systemImage: "tray", description: Text("右下のボタンからタスクを追加しましょう。"))
                 } else {
                     ForEach(viewModel.inboxTasks) { task in
-                        InboxTaskRow(task: task)
+                        Button {
+                            detailContext = TaskDetailContext(id: task.id)
+                        } label: {
+                            InboxTaskRow(task: task)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -91,6 +105,7 @@ private struct InboxPage: View {
 
 private struct ActivePage: View {
     @ObservedObject var viewModel: TaskBoardViewModel
+    @Binding var detailContext: TaskDetailContext?
     
     var body: some View {
         NavigationStack {
@@ -99,7 +114,12 @@ private struct ActivePage: View {
                     ContentUnavailableView("作業中タスクなし", systemImage: "checklist", description: Text("詳細化を完了するとここに表示されます。"))
                 } else {
                     ForEach(viewModel.activeTasks) { task in
-                        ActiveTaskRow(task: task)
+                        Button {
+                            detailContext = TaskDetailContext(id: task.id)
+                        } label: {
+                            ActiveTaskRow(task: task)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -110,6 +130,7 @@ private struct ActivePage: View {
 
 private struct CompletedPage: View {
     @ObservedObject var viewModel: TaskBoardViewModel
+    @Binding var detailContext: TaskDetailContext?
     
     var body: some View {
         NavigationStack {
@@ -118,7 +139,12 @@ private struct CompletedPage: View {
                     ContentUnavailableView("完了タスクなし", systemImage: "archivebox", description: Text("完了したタスクはここに保存されます。"))
                 } else {
                     ForEach(viewModel.completedTasks) { task in
-                        CompletedTaskRow(task: task)
+                        Button {
+                            detailContext = TaskDetailContext(id: task.id)
+                        } label: {
+                            CompletedTaskRow(task: task)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }

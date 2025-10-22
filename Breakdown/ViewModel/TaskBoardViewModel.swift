@@ -60,6 +60,21 @@ final class TaskBoardViewModel: ObservableObject {
         recalculateConflicts()
     }
     
+    func task(with id: UUID) -> Task? {
+        tasks.first(where: { $0.id == id })
+    }
+    
+    func updateStatus(for taskID: UUID, to status: TaskStatus) {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks[index].status = status
+        if status == .completed {
+            tasks[index].completedAt = Date()
+        } else {
+            tasks[index].completedAt = nil
+        }
+        recalculateConflicts()
+    }
+    
     func markTaskCompleted(_ taskID: UUID) {
         guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
         tasks[index].status = .completed
